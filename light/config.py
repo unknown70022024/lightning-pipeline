@@ -152,6 +152,12 @@ GLM_CONCURRENCY = _env_int("GLM_CONCURRENCY", 32)
 GLM_TIMEOUT = _env_int("GLM_TIMEOUT", 30)   # 单文件总时长上限（文件仅约 300 KB）
 GLM_MAX_FILES = _env_int("GLM_MAX_FILES", 400)   # 60min/20s = 180/星，留余量
 
+# 文件抽样步长：GLM 是 20 秒一个 granule，60 分钟双星就是 360 个文件（约 110 MB），
+# 但输出上限只有 2500 点 —— 也就是采了 10 倍于所需的量。
+# stride=3 表示每 3 个文件取 1 个（等效 1 分钟时间分辨率），能砍掉 2/3 的流量。
+# stride=1 表示不抽样。
+GLM_FILE_STRIDE = _env_int("GLM_FILE_STRIDE", 1)
+
 
 # ---------------------------------------------------------------------------
 # EUMETSAT MTG LI

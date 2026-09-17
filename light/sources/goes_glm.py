@@ -163,6 +163,12 @@ def fetch(dt_end: datetime, window_minutes: int,
         logger.warning("GOES GLM: 窗口 %s .. %s 内没有文件",
                        t_start.isoformat(), t_end.isoformat())
         return []
+    if config.GLM_FILE_STRIDE > 1:
+        before = len(jobs)
+        jobs = jobs[::config.GLM_FILE_STRIDE]
+        logger.info("GOES GLM: 抽样步长 %d，%d -> %d 个文件",
+                    config.GLM_FILE_STRIDE, before, len(jobs))
+
     if len(jobs) > config.GLM_MAX_FILES:
         logger.warning("GOES GLM: 文件数 %d 超过上限 %d，截断",
                        len(jobs), config.GLM_MAX_FILES)

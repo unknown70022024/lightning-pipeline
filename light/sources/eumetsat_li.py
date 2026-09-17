@@ -33,7 +33,7 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 
-from light import config
+from light import config, http
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +103,14 @@ def search(dt_start: datetime, dt_end: datetime, token: str | None) -> list[dict
         "dtend": dt_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     url = config.EUMETSAT_SEARCH_URL + "?" + urllib.parse.urlencode(q)
+    blob = http.fetch_bytes(url, timeout=60)
+    if blob is None:
+        logger.warning("EUMETSAT 检索失败")
+        return []
     try:
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            data = json.loads(resp.read())
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError,
-            json.JSONDecodeError) as exc:
-        logger.warning("EUMETSAT 检索失败: %s: %s", type(exc).__name__, exc)
+        data = json.loads(blob)
+    except json.JSONDecodeError as exc:
+        logger.warning("EUMETSAT 检索返回非 JSON: %s", exc)
         return []
     feats = data.get("features") or []
     logger.info("EUMETSAT: 命中 %s 条，取 %d 条",
@@ -203,15 +205,10 @@ def _download_one(entry: dict, token: str) -> list[tuple[float, float, str, floa
     if not href:
         return []
     eid = entry.get("id", "?")
-    req = urllib.request.Request(href, headers={"Authorization": f"Bearer {token}"})
-    try:
-        with urllib.request.urlopen(req, timeout=config.EUMETSAT_TIMEOUT) as resp:
-            blob = resp.read()
-    except urllib.error.HTTPError as exc:
-        logger.warning("EUMETSAT 下载失败 HTTP %s (%s)", exc.code, str(eid)[:50])
-        return []
-    except (urllib.error.URLError, OSError) as exc:
-        logger.warning("EUMETSAT 下载失败 %s: %s", type(exc).__name__, exc)
+    blob = http.fetch_bytes(href, headers={"Authorization": f"Bearer {token}"},
+                            timeout=config.EUMETSAT_TIMEOUT)
+    if blob is None:
+        logger.warning("EUMETSAT 下载失败 (%s)", str(eid)[:60])
         return []
     return _parse_body(blob, str(eid)[-40:])
 

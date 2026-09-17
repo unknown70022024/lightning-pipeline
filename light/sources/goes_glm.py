@@ -19,12 +19,10 @@ from __future__ import annotations
 import concurrent.futures
 import io
 import logging
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
 
-from light import config
+from light import config, http
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +70,9 @@ def _list_hour(bucket: str, dt: datetime) -> list[str]:
         if token:
             q["continuation-token"] = token
         url = _S3_LIST.format(bucket=bucket) + "?" + urllib.parse.urlencode(q)
-        try:
-            with urllib.request.urlopen(url, timeout=60) as resp:
-                body = resp.read()
-        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
-            logger.warning("GLM 列目录失败 %s: %s: %s", prefix,
-                           type(exc).__name__, exc)
+        body = http.fetch_bytes(url, timeout=60)
+        if body is None:
+            logger.warning("GLM 列目录失败 %s", prefix)
             return keys
         try:
             import xml.etree.ElementTree as ET
@@ -104,11 +99,8 @@ def _download_flashes(bucket: str, key: str, t_start: datetime,
     import numpy as np
 
     url = _S3_GET.format(bucket=bucket, key=urllib.parse.quote(key))
-    try:
-        with urllib.request.urlopen(url, timeout=config.GLM_TIMEOUT) as resp:
-            blob = resp.read()
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
-        logger.debug("GLM 下载失败 %s: %s", key, exc)
+    blob = http.fetch_bytes(url, timeout=config.GLM_TIMEOUT)
+    if blob is None:
         return []
 
     tag = "goes18" if "G18" in key else "goes19"

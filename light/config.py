@@ -149,7 +149,7 @@ def blitz_in_bbox(lat: float, lon: float) -> bool:
 GOES_BUCKETS = {"goes18": "noaa-goes18", "goes19": "noaa-goes19"}
 GLM_PREFIX = "GLM-L2-LCFA"
 GLM_CONCURRENCY = _env_int("GLM_CONCURRENCY", 32)
-GLM_TIMEOUT = _env_int("GLM_TIMEOUT", 90)
+GLM_TIMEOUT = _env_int("GLM_TIMEOUT", 30)   # 单文件总时长上限（文件仅约 300 KB）
 GLM_MAX_FILES = _env_int("GLM_MAX_FILES", 400)   # 60min/20s = 180/星，留余量
 
 
@@ -161,7 +161,7 @@ EUMETSAT_TOKEN_URL = "https://api.eumetsat.int/token"
 EUMETSAT_SEARCH_URL = "https://api.eumetsat.int/data/search-products/1.0.0/os"
 EUMETSAT_DOWNLOAD_URL = "https://api.eumetsat.int/data/download/1.0.0"
 EUMETSAT_COLLECTION = os.environ.get("EUMETSAT_COLLECTION", "EO:EUM:DAT:0691")  # LI L2 LFL
-EUMETSAT_TIMEOUT = _env_int("EUMETSAT_TIMEOUT", 120)
+EUMETSAT_TIMEOUT = _env_int("EUMETSAT_TIMEOUT", 60)   # 单产品总时长上限（仅约 500 KB）
 EUMETSAT_CONCURRENCY = _env_int("EUMETSAT_CONCURRENCY", 8)
 EUMETSAT_MAX_PRODUCTS = _env_int("EUMETSAT_MAX_PRODUCTS", 12)   # 60min/10min = 6，留余量
 

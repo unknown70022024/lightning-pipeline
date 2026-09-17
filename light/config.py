@@ -23,6 +23,35 @@ from __future__ import annotations
 
 import math
 import os
+import pathlib
+
+
+def _load_env_files() -> None:
+    """从 ~/.lightning.env 和仓库根的 .env 读环境变量。
+
+    已存在的环境变量优先，不会被覆盖。密钥建议放仓库外
+    （~/.lightning.env）—— 那样即使误操作 git add -A 也提交不上去。
+    """
+    here = pathlib.Path(__file__).resolve().parent.parent
+    for path in (pathlib.Path.home() / ".lightning.env", here / ".env"):
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
+_load_env_files()
 
 
 def _env_float(name: str, default: float) -> float:

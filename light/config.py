@@ -200,6 +200,12 @@ EUMETSAT_TIMEOUT = _env_int("EUMETSAT_TIMEOUT", 60)   # 单产品总时长上限
 EUMETSAT_CONCURRENCY = _env_int("EUMETSAT_CONCURRENCY", 8)
 EUMETSAT_MAX_PRODUCTS = _env_int("EUMETSAT_MAX_PRODUCTS", 12)   # 60min/10min = 6，留余量
 
+# 闪击置信度下限（flash_filter_confidence 已展开到 0..1）。
+# 实测一个 10 分钟的全圆盘产品有 3.4 万个闪击 —— 折合约 56 次/秒，
+# 而全球平均只有约 44 次/秒，说明其中有大量低置信度的误检。
+# 设 0 表示不过滤，便于先看原始分布再定阈值。
+EUMETSAT_MIN_CONFIDENCE = _env_float("EUMETSAT_MIN_CONFIDENCE", 0.5)
+
 EUMETSAT_KEY = os.environ.get("EUMETSAT_CONSUMER_KEY", "").strip()
 EUMETSAT_SECRET = os.environ.get("EUMETSAT_CONSUMER_SECRET", "").strip()
 

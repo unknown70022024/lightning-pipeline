@@ -156,6 +156,52 @@ Zone BLITZ  : 亚太 lon 70…180, lat −55…60
 
 不需要信用卡、机构邮箱、审批、纸质协议，也不需要 EUMETCast 接收站。
 
+### 实测踩到的三个坑
+
+**1. `links` 在 `properties` 里面，不在顶层**
+
+```
+{"properties": {..., "links": {"type": "Links", "data": [{"href": ...}]}}}
+```
+
+**2. 经纬度是 packed 的，h5py 不会自动解包**
+
+```
+latitude  : int16, scale_factor=0.0027, _FillValue=-32767
+longitude : int16, scale_factor=0.0027, _FillValue=-32767
+flash_filter_confidence : uint8, scale_factor=0.004, _FillValue=255
+```
+
+不解包的话纬度读成整数、经度会出现 8436 这种荒唐值。代码里 `_read_packed()`
+统一处理 scale_factor / add_offset / _FillValue。
+
+**3. `flash_filter_confidence` 是二值的，必须过滤**
+
+实测一个 10 分钟全圆盘产品：
+
+```
+置信度 < 0.1 : 30,654 个 (90.3%)   ← 未通过滤波器
+置信度 ≈ 1.0 :  3,302 个 ( 9.7%)   ← 通过
+中间值       :      0
+```
+
+不过滤的话是 56 次/秒，而全球平均只有约 44 次/秒 —— 明显偏高。
+过滤后 5.5 次/秒，与 GOES GLM 双星的 7 次/秒量级一致。
+阈值由 `EUMETSAT_MIN_CONFIDENCE` 控制，默认 **0.5**。
+
+### 产品结构
+
+下载得到 ZIP，内含：
+
+| 成员 | 说明 |
+|---|---|
+| `…CHK-BODY…nc` | **数据本体**（要解析的） |
+| `…CHK-TRAIL…nc` | trailer，含历史块列表 |
+| `manifest.xml` / `EOPMetadata.xml` | 元数据 |
+| `quicklooks/*` | 预览图 |
+
+注意按 `BODY` 而不是按 `.nc` 后缀挑成员 —— namelist 里 TRAIL 排在 BODY 前面。
+
 认证流程（代码已实现）：
 
 ```

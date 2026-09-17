@@ -135,6 +135,34 @@ def _entry_window(entry: dict) -> tuple[datetime, datetime] | None:
 # 下载 + 解析
 # ---------------------------------------------------------------------------
 
+def _read_packed(h, name: str):
+    """读 NetCDF 变量并应用 scale_factor / add_offset。
+
+    **h5py 不会自动解包**，而 MTG LI 的经纬度恰恰是 packed 的：
+
+        latitude  : int16, scale_factor=0.0027, _FillValue=-32767
+        longitude : int16, scale_factor=0.0027, _FillValue=-32767
+        flash_filter_confidence : uint8, scale_factor=0.004, _FillValue=255
+
+    不解包的话经度会读成 8436 这种荒唐值。
+
+    Returns:
+        (values_float64_scaled, valid_mask)
+    """
+    import numpy as np
+
+    d = h[name]
+    raw = np.asarray(d[:]).ravel()
+    attrs = d.attrs
+    sf = float(np.asarray(attrs.get("scale_factor", 1.0)).ravel()[0])
+    ao = float(np.asarray(attrs.get("add_offset", 0.0)).ravel()[0])
+    valid = np.ones(raw.shape, dtype=bool)
+    fill = attrs.get("_FillValue")
+    if fill is not None:
+        valid &= raw != np.asarray(fill).ravel()[0]
+    return raw.astype("float64") * sf + ao, valid
+
+
 def _parse_body(blob: bytes, tag: str) -> list[tuple[float, float, str, float]]:
     """从 ZIP 里取出 BODY NetCDF 并抽取经纬度。"""
     import h5py
@@ -170,14 +198,14 @@ def _parse_body(blob: bytes, tag: str) -> list[tuple[float, float, str, float]]:
             if not lat_name or not lon_name:
                 logger.warning("EUMETSAT: 找不到经纬度变量。成员=%s", names[:40])
                 return []
-            lat = np.asarray(h[lat_name][:], dtype="float64").ravel()
-            lon = np.asarray(h[lon_name][:], dtype="float64").ravel()
-            qual = None
+            lat, lat_ok = _read_packed(h, lat_name)
+            lon, lon_ok = _read_packed(h, lon_name)
+            conf = conf_ok = None
             if qual_name:
                 try:
-                    qual = np.asarray(h[qual_name][:]).ravel()
+                    conf, conf_ok = _read_packed(h, qual_name)
                 except Exception:                 # noqa: BLE001
-                    qual = None
+                    conf = None
     except Exception as exc:                      # noqa: BLE001
         logger.warning("EUMETSAT: NetCDF 解析失败: %s: %s", type(exc).__name__, exc)
         return []
@@ -189,20 +217,54 @@ def _parse_body(blob: bytes, tag: str) -> list[tuple[float, float, str, float]]:
 
     n = min(lat.size, lon.size)
     lat, lon = lat[:n], lon[:n]
-    mask = np.isfinite(lat) & np.isfinite(lon) & (lat >= -90) & (lat <= 90)
-    if qual is not None and qual.size >= n:
-        # LI 的 quality/confidence 语义与 GLM 不同，这里只剔除明显无效值
-        mask &= np.isfinite(qual)
+    mask = (lat_ok[:n] & lon_ok[:n]
+            & np.isfinite(lat) & np.isfinite(lon)
+            & (lat >= -90) & (lat <= 90) & (lon >= -180) & (lon <= 180))
+    if conf is not None and conf_ok is not None and conf.size >= n:
+        c = conf[:n]
+        mask &= conf_ok[:n] & np.isfinite(c)
+        if config.EUMETSAT_MIN_CONFIDENCE > 0:
+            # flash_filter_confidence 已按 scale_factor 展开到 0..1
+            mask &= c >= config.EUMETSAT_MIN_CONFIDENCE
+    kept, total = int(mask.sum()), int(n)
     lat, lon = lat[mask], lon[mask]
+    logger.info("EUMETSAT: 置信度过滤 %.2f -> 保留 %d/%d (%.0f%%)",
+                config.EUMETSAT_MIN_CONFIDENCE, kept, total,
+                100.0 * kept / max(total, 1))
     logger.info("EUMETSAT: %s -> %d 个闪击（lat=%s lon=%s qual=%s）",
                 tag, lat.size, lat_name, lon_name, qual_name)
     return [(float(a), float(b), "mtg-li", 1.0) for a, b in zip(lat, lon)]
 
 
+def _download_href(entry: dict) -> str | None:
+    """从检索条目里取出产品下载链接。
+
+    注意 EUMETSAT OpenSearch 把 links 放在 **properties 里面**，
+    不是顶层 —— 踩过一次坑：
+
+        {"properties": {..., "links": {"type": "Links", "data": [{"href": ...}]}}}
+
+    这里两种位置都找一遍，免得以后再变。
+    """
+    props = entry.get("properties") or {}
+    for holder in (props, entry):
+        links = holder.get("links")
+        if isinstance(links, dict):
+            data = links.get("data") or []
+            if data and isinstance(data[0], dict):
+                return data[0].get("href")
+        elif isinstance(links, list) and links:
+            first = links[0]
+            if isinstance(first, dict):
+                return first.get("href")
+    return None
+
+
 def _download_one(entry: dict, token: str) -> list[tuple[float, float, str, float]]:
-    links = ((entry.get("links") or {}).get("data") or [])
-    href = links[0].get("href") if links else None
+    href = _download_href(entry)
     if not href:
+        logger.warning("EUMETSAT: 条目里找不到下载链接 (id=%s)",
+                       str(entry.get("id"))[:50])
         return []
     eid = entry.get("id", "?")
     blob = http.fetch_bytes(href, headers={"Authorization": f"Bearer {token}"},

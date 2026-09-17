@@ -1,0 +1,80 @@
+name: Lightning fusion
+
+on:
+  schedule:
+    # 与 polar_plus 云管线同频（每 2 小时 :48），方便两边对齐云图时间戳
+    - cron: '48 0,2,4,6,8,10,12,14,16,18,20,22 * * *'
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: '启用的源（逗号分隔）: blitzortung,glm,eumetsat'
+        required: false
+        default: 'blitzortung,glm,eumetsat'
+      window_minutes:
+        description: '时间窗长度（分钟）'
+        required: false
+        default: '60'
+      max_points:
+        description: '输出点上限'
+        required: false
+        default: '2500'
+
+permissions:
+  contents: read
+
+jobs:
+  lightning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run lightning fusion
+        run: python -m light.pipeline
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/output
+          # 手动触发时用输入值；定时触发时用仓库变量或默认值
+          LIGHT_SOURCES: ${{ github.event.inputs.sources || 'blitzortung,glm,eumetsat' }}
+          LIGHT_WINDOW_MINUTES: ${{ github.event.inputs.window_minutes || '60' }}
+          LIGHT_MAX_POINTS: ${{ github.event.inputs.max_points || '2500' }}
+          LIGHT_BLITZ_LON_MIN: ${{ vars.LIGHT_BLITZ_LON_MIN }}
+          LIGHT_BLITZ_LON_MAX: ${{ vars.LIGHT_BLITZ_LON_MAX }}
+          LIGHT_BLITZ_LAT_MIN: ${{ vars.LIGHT_BLITZ_LAT_MIN }}
+          LIGHT_BLITZ_LAT_MAX: ${{ vars.LIGHT_BLITZ_LAT_MAX }}
+          EUMETSAT_CONSUMER_KEY: ${{ secrets.EUMETSAT_CONSUMER_KEY }}
+          EUMETSAT_CONSUMER_SECRET: ${{ secrets.EUMETSAT_CONSUMER_SECRET }}
+
+      - name: Show coverage summary
+        if: always()
+        run: |
+          echo "=== storms.json ==="
+          python -c "
+          import json,collections
+          d=json.load(open('output/latest/storms.json'))
+          print('points:',len(d))
+          b=collections.Counter((int(x['lat']//30)*30, int(x['lng']//30)*30) for x in d)
+          for (la,lo),c in b.most_common(10):
+              print(f'  lat {la:+4d} lon {lo:+4d} : {c}')
+          "
+          echo "=== meta ==="
+          cat output/latest/storms_meta.json
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storms-${{ github.run_number }}
+          path: |
+            output/latest/storms.json
+            output/latest/storms_meta.json
+          retention-days: 14
